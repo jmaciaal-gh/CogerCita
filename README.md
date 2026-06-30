@@ -9,7 +9,9 @@ Agente modular para automatizar la preparación de cita previa del SEPE en la UR
 - `cogercita/config.py`: configuración desacoplada por variables de entorno y valores por defecto.
 - `cogercita/agent.py`: orquestación del flujo, validaciones, selección de oficina/canal/trámite y confirmación previa al envío.
 - `cogercita/scheduler.py`: lógica de selección de fecha/hora (objetivo +7 días +1 hora y reglas de fallback).
-- `cogercita/navigator.py`: interfaz de automatización web para desacoplar Playwright u otro driver.
+- `cogercita/navigator.py`: interfaz de automatización web para desacoplar drivers.
+- `cogercita/playwright_navigator.py`: implementación concreta con selectores robustos y fallback por etiqueta.
+- `cogercita/state.py`: gestión de estado conversacional y de ejecución.
 - `cogercita/errors.py`: errores de dominio y manejo explícito de casos no permitidos (CAPTCHA/autenticación oficial).
 - `cogercita/logging_config.py`: logging estructurado.
 - `cogercita/cli.py`: entrada de ejemplo.
@@ -56,4 +58,4 @@ python -m unittest discover -s tests -v
 python -m cogercita.cli
 ```
 
-Para la automatización real, implementa `BrowserNavigator` (por ejemplo con Playwright) y conéctalo a `SepeAppointmentAgent`.
+Para automatización real, usa `PlaywrightNavigator` o cualquier implementación compatible de `BrowserNavigator` y conéctala a `SepeAppointmentAgent`.

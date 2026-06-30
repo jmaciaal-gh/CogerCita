@@ -16,6 +16,7 @@ from .errors import (
 from .models import AppointmentDraft, SelectionResolution
 from .navigator import BrowserNavigator
 from .scheduler import compute_target_datetime, select_best_slot
+from .state import AgentState, SessionState
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,11 +34,13 @@ class SepeAppointmentAgent:
 
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
+        self.state = SessionState()
 
     def prepare_draft(self, navigator: BrowserNavigator, now: datetime | None = None) -> AppointmentDraft:
         """Prepare the request but never submit without explicit confirmation."""
         run_now = now or datetime.now()
         target = compute_target_datetime(run_now)
+        self.state.status = AgentState.OPENING_PAGE
         LOGGER.info("Opening SEPE page")
 
         try:
@@ -47,8 +50,10 @@ class SepeAppointmentAgent:
             raise PageUnavailableError(str(exc)) from exc
 
         if navigator.captcha_or_official_auth_required():
+            self.state.status = AgentState.BLOCKED
             raise CaptchaDetectedError("Autenticación oficial/CAPTCHA detectado. Intervención del usuario requerida.")
 
+        self.state.status = AgentState.FILLING_DATA
         navigator.fill_personal_data(
             document_id=self.config.personal_data.document_id,
             full_name=self.config.personal_data.full_name,
@@ -58,6 +63,7 @@ class SepeAppointmentAgent:
         )
 
         warnings: list[str] = []
+        self.state.status = AgentState.SELECTING_OPTIONS
         self._ensure_required_option(navigator, "procedure_type", self.config.preferences.procedure_type, warnings)
         self._ensure_required_option(navigator, "office_type", self.config.preferences.office_type, warnings)
         self._ensure_required_option(navigator, "office", self.config.preferences.office, warnings)
@@ -72,6 +78,7 @@ class SepeAppointmentAgent:
         if navigator.session_expired():
             raise SessionExpiredError("Sesión caducada durante la preparación de la cita.")
 
+        self.state.status = AgentState.SELECTING_SLOT
         slots = list(navigator.get_available_slots())
         if not slots:
             raise NoSlotsAvailableError("No existen citas disponibles.")
@@ -98,6 +105,7 @@ class SepeAppointmentAgent:
             "Correo electrónico": self.config.personal_data.email,
         }
 
+        self.state.status = AgentState.WAITING_CONFIRMATION
         return AppointmentDraft(
             target_date_time=target,
             selected_slot=selected_slot,
@@ -110,10 +118,13 @@ class SepeAppointmentAgent:
         """Submit only after explicit user confirmation."""
         if not confirmed:
             LOGGER.info("Submission canceled by user")
+            self.state.status = AgentState.WAITING_CONFIRMATION
             return False
         if navigator.captcha_or_official_auth_required():
+            self.state.status = AgentState.BLOCKED
             raise CaptchaDetectedError("Autenticación oficial/CAPTCHA detectado antes de enviar.")
         navigator.submit()
+        self.state.status = AgentState.SUBMITTED
         LOGGER.info("Request submitted")
         return True
 
@@ -132,5 +143,7 @@ class SepeAppointmentAgent:
                 f"Alternativas: {', '.join(resolution.alternatives) if resolution.alternatives else 'ninguna'}"
             )
             warnings.append(msg)
+            self.state.status = AgentState.BLOCKED
+            self.state.last_error = msg
             raise OptionUnavailableError(msg)
         navigator.choose_option(field_key, resolution.selected)
